@@ -17,11 +17,22 @@ class IndianStockMarketChatbot:
     def fetch_data(self, symbol):
         end_date = datetime.now()
         start_date = end_date - timedelta(days=365*40)  # 40 years of data
-        stock = yf.Ticker(f"{symbol}.NS")  # .NS for National Stock Exchange of India
-        df = stock.history(start=start_date, end=end_date)
-        if df.empty:
-            raise ValueError(f"No data found for symbol {symbol}. Please check if it's a valid Indian stock symbol.")
-        self.data[symbol] = df
+        
+        # Try NSE first
+        stock_nse = yf.Ticker(f"{symbol}.NS")
+        df_nse = stock_nse.history(start=start_date, end=end_date)
+        
+        # If NSE data is empty, try BSE
+        if df_nse.empty:
+            stock_bse = yf.Ticker(f"{symbol}.BO")
+            df_bse = stock_bse.history(start=start_date, end=end_date)
+            
+            if df_bse.empty:
+                raise ValueError(f"No data found for symbol {symbol} on NSE or BSE. Please check if it's a valid Indian stock symbol.")
+            else:
+                self.data[symbol] = df_bse
+        else:
+            self.data[symbol] = df_nse
 
     def prepare_data(self, symbol):
         df = self.data[symbol]
@@ -125,7 +136,7 @@ def main():
 
     chatbot = IndianStockMarketChatbot(openai_api_key)
 
-    symbol = st.text_input("Enter a stock symbol (e.g., 'IDFC'):", "").strip().upper()
+    symbol = st.text_input("Enter a stock symbol (e.g., 'KALYANKJIL' for Kalyan Jewellers):", "").strip().upper()
 
     if st.button("Analyze"):
         if symbol:
