@@ -9,6 +9,11 @@ from openai import OpenAI
 import os
 import pytz
 import plotly.graph_objects as go
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class IndianStockMarketChatbot:
     def __init__(self, openai_api_key):
@@ -17,6 +22,7 @@ class IndianStockMarketChatbot:
         self.client = OpenAI(api_key=openai_api_key)
 
     def fetch_data(self, stock_name):
+        logger.info(f"Fetching data for {stock_name}")
         end_date = datetime.now(pytz.timezone('Asia/Kolkata'))
         start_date = end_date - timedelta(days=365)  # 1 year of data
 
@@ -25,19 +31,24 @@ class IndianStockMarketChatbot:
         bse_symbol = self.search_stock(stock_name, '.BO')
 
         if nse_symbol:
+            logger.info(f"Found {stock_name} on NSE: {nse_symbol}")
             df = yf.download(nse_symbol, start=start_date, end=end_date)
         elif bse_symbol:
+            logger.info(f"Found {stock_name} on BSE: {bse_symbol}")
             df = yf.download(bse_symbol, start=start_date, end=end_date)
         else:
+            logger.error(f"No data found for stock {stock_name} on NSE or BSE")
             raise ValueError(f"No data found for stock {stock_name} on NSE or BSE.")
 
         if df.empty:
+            logger.error(f"Insufficient data for stock {stock_name}")
             raise ValueError(f"Insufficient data for stock {stock_name}.")
 
         self.data[stock_name] = df
         return nse_symbol or bse_symbol
 
     def search_stock(self, stock_name, suffix):
+        logger.info(f"Searching for {stock_name} with suffix {suffix}")
         search_result = yf.Ticker(f"{stock_name}{suffix}")
         info = search_result.info
         if info and 'regularMarketPrice' in info and info['regularMarketPrice'] is not None:
@@ -45,6 +56,7 @@ class IndianStockMarketChatbot:
         return None
 
     def prepare_data(self, stock_name):
+        logger.info(f"Preparing data for {stock_name}")
         df = self.data[stock_name]
         df['Returns'] = df['Close'].pct_change()
         df['Target'] = df['Close'].shift(-1)
@@ -57,12 +69,14 @@ class IndianStockMarketChatbot:
         return train_test_split(X, y, test_size=0.2, random_state=42)
 
     def train_model(self, stock_name):
+        logger.info(f"Training model for {stock_name}")
         X_train, X_test, y_train, y_test = self.prepare_data(stock_name)
         model = RandomForestRegressor(n_estimators=100, random_state=42)
         model.fit(X_train, y_train)
         self.models[stock_name] = model
 
     def predict_price(self, stock_name, days=1):
+        logger.info(f"Predicting price for {stock_name} for {days} day(s)")
         if stock_name not in self.models:
             self.train_model(stock_name)
 
@@ -77,26 +91,33 @@ class IndianStockMarketChatbot:
         return prediction
 
     def get_ai_insights(self, stock_name, analysis):
+        logger.info(f"Getting AI insights for {stock_name}")
         prompt = f"Given the following analysis for the Indian stock {stock_name}:\n\n{analysis}\n\nProvide additional insights and considerations for potential investors. Consider market trends, company fundamentals, and potential risks."
         
-        response = self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a financial analyst specializing in the Indian stock market."},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        
-        return response.choices[0].message.content
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a financial analyst specializing in the Indian stock market."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Error getting AI insights: {str(e)}")
+            raise
 
     def analyze_stock(self, stock_name):
+        logger.info(f"Analyzing stock: {stock_name}")
         try:
             symbol = self.fetch_data(stock_name)
         except ValueError as e:
-            return str(e)
+            logger.error(f"Error fetching data for {stock_name}: {str(e)}")
+            return str(e), None
 
         if stock_name not in self.data or self.data[stock_name].empty:
-            return f"Unable to analyze {stock_name}. No data available."
+            logger.warning(f"No data available for {stock_name}")
+            return f"Unable to analyze {stock_name}. No data available.", None
 
         df = self.data[stock_name]
         current_price = df['Close'][-1]
@@ -107,7 +128,8 @@ class IndianStockMarketChatbot:
             closing_price_prediction = self.predict_price(stock_name)
             predicted_return = (tomorrow_prediction - current_price) / current_price
         except Exception as e:
-            return f"Error in prediction for {stock_name}: {str(e)}"
+            logger.error(f"Error in prediction for {stock_name}: {str(e)}")
+            return f"Error in prediction for {stock_name}: {str(e)}", None
 
         analysis = f"Analysis for {stock_name} ({symbol}):\n"
         analysis += f"Current Price: ₹{current_price:.2f}\n"
@@ -127,11 +149,13 @@ class IndianStockMarketChatbot:
             ai_insights = self.get_ai_insights(stock_name, analysis)
             analysis += f"\nAI-Generated Insights:\n{ai_insights}"
         except Exception as e:
+            logger.error(f"Unable to generate AI insights for {stock_name}: {str(e)}")
             analysis += f"\nUnable to generate AI insights: {str(e)}"
 
         return analysis, df
 
     def plot_stock_data(self, stock_name, df):
+        logger.info(f"Plotting stock data for {stock_name}")
         fig = go.Figure()
 
         # Plot historical data
@@ -187,11 +211,18 @@ def main():
     if st.button("Analyze"):
         if stock_name:
             with st.spinner(f"Analyzing {stock_name}..."):
-                analysis, df = chatbot.analyze_stock(stock_name)
-                st.text_area("Analysis Result:", analysis, height=400)
-                
-                fig = chatbot.plot_stock_data(stock_name, df)
-                st.plotly_chart(fig)
+                try:
+                    analysis, df = chatbot.analyze_stock(stock_name)
+                    st.text_area("Analysis Result:", analysis, height=400)
+                    
+                    if df is not None:
+                        fig = chatbot.plot_stock_data(stock_name, df)
+                        st.plotly_chart(fig)
+                    else:
+                        st.error("Unable to plot stock data due to insufficient data.")
+                except Exception as e:
+                    st.error(f"An error occurred while analyzing the stock: {str(e)}")
+                    logger.error(f"Error in stock analysis: {str(e)}", exc_info=True)
         else:
             st.warning("Please enter a stock name.")
 
