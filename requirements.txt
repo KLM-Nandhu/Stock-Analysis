@@ -3,4 +3,4 @@ yfinance
 pandas
 scikit-learn
 numpy
-openai
+openai==0.28
