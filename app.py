@@ -18,13 +18,19 @@ class IndianStockMarketChatbot:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=365*40)  # 40 years of data
         stock = yf.Ticker(f"{symbol}.NS")  # .NS for National Stock Exchange of India
-        self.data[symbol] = stock.history(start=start_date, end=end_date)
+        df = stock.history(start=start_date, end=end_date)
+        if df.empty:
+            raise ValueError(f"No data found for symbol {symbol}. Please check if it's a valid Indian stock symbol.")
+        self.data[symbol] = df
 
     def prepare_data(self, symbol):
         df = self.data[symbol]
         df['Returns'] = df['Close'].pct_change()
         df['Target'] = df['Close'].shift(-1)
         df = df.dropna()
+
+        if df.empty:
+            raise ValueError(f"Insufficient data for symbol {symbol} after preprocessing.")
 
         features = ['Open', 'High', 'Low', 'Close', 'Volume', 'Returns']
         X = df[features]
@@ -61,13 +67,23 @@ class IndianStockMarketChatbot:
         return response.choices[0].message['content']
 
     def analyze_stock(self, symbol):
-        self.fetch_data(symbol)
+        try:
+            self.fetch_data(symbol)
+        except ValueError as e:
+            return str(e)
+
+        if symbol not in self.data or self.data[symbol].empty:
+            return f"Unable to analyze {symbol}. No data available."
+
         current_price = self.data[symbol]['Close'][-1]
         yearly_returns = self.data[symbol]['Close'].resample('Y').last().pct_change()
         avg_yearly_return = yearly_returns.mean()
         
-        next_day_prediction = self.predict_next_day(symbol)
-        predicted_return = (next_day_prediction - current_price) / current_price
+        try:
+            next_day_prediction = self.predict_next_day(symbol)
+            predicted_return = (next_day_prediction - current_price) / current_price
+        except Exception as e:
+            return f"Error in prediction for {symbol}: {str(e)}"
 
         analysis = f"Analysis for {symbol}:\n"
         analysis += f"Current Price: ₹{current_price:.2f}\n"
@@ -82,8 +98,11 @@ class IndianStockMarketChatbot:
         else:
             analysis += "Recommendation: Hold. The model predicts a relatively stable price.\n"
 
-        ai_insights = self.get_ai_insights(symbol, analysis)
-        analysis += f"\nAI-Generated Insights:\n{ai_insights}"
+        try:
+            ai_insights = self.get_ai_insights(symbol, analysis)
+            analysis += f"\nAI-Generated Insights:\n{ai_insights}"
+        except Exception as e:
+            analysis += f"\nUnable to generate AI insights: {str(e)}"
 
         return analysis
 
@@ -110,13 +129,9 @@ def main():
 
     if st.button("Analyze"):
         if symbol:
-            try:
-                with st.spinner(f"Analyzing {symbol}..."):
-                    analysis = chatbot.analyze_stock(symbol)
-                st.text_area("Analysis Result:", analysis, height=400)
-            except Exception as e:
-                st.error(f"An error occurred: {str(e)}")
-                st.error("Please make sure you entered a valid Indian stock symbol.")
+            with st.spinner(f"Analyzing {symbol}..."):
+                analysis = chatbot.analyze_stock(symbol)
+            st.text_area("Analysis Result:", analysis, height=400)
         else:
             st.warning("Please enter a stock symbol.")
 
