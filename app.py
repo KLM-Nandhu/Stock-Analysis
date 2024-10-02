@@ -78,7 +78,7 @@ class IndianStockMarketChatbot:
         prompt = f"Given the following analysis for the Indian stock {symbol}:\n\n{analysis}\n\nProvide additional insights and considerations for potential investors. Consider market trends, company fundamentals, and potential risks."
         
         response = self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="4o-mini",
             messages=[
                 {"role": "system", "content": "You are a financial analyst specializing in the Indian stock market."},
                 {"role": "user", "content": prompt}
